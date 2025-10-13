@@ -4,18 +4,55 @@
 #include <atomic>
 #include <thread>
 #include <filesystem>
+#include <algorithm>
 
-#include <glad/glad.h>
-#include <GLFW/glfw3.h>
+#ifdef _WIN32
+    #define WIN32_LEAN_AND_MEAN
+    #define NOMINMAX  // Prevent Windows from defining min/max macros
+    #include <windows.h>
+    #include <d3d11.h>
+    #include <tchar.h>
+    #pragma comment(lib, "d3d11.lib")
+    #define PLATFORM_WINDOWS
+#else
+    #include <glad/glad.h>
+    #include <GLFW/glfw3.h>
+    #define PLATFORM_LINUX
+#endif
+
 #include "imgui.h"
-#include "backends/imgui_impl_glfw.h"
-#include "backends/imgui_impl_opengl3.h"
+#ifdef PLATFORM_WINDOWS
+    #include "backends/imgui_impl_win32.h"
+    #include "backends/imgui_impl_dx11.h"
+#else
+    #include "backends/imgui_impl_glfw.h"
+    #include "backends/imgui_impl_opengl3.h"
+#endif
 
 #include "walkk.h"
 
+#ifdef PLATFORM_WINDOWS
+// Forward declare message handler from imgui_impl_win32.cpp
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+// DirectX11 data
+static ID3D11Device*            g_pd3dDevice = nullptr;
+static ID3D11DeviceContext*     g_pd3dDeviceContext = nullptr;
+static IDXGISwapChain*          g_pSwapChain = nullptr;
+static ID3D11RenderTargetView*  g_mainRenderTargetView = nullptr;
+
+bool CreateDeviceD3D(HWND hWnd);
+void CleanupDeviceD3D();
+void CreateRenderTarget();
+void CleanupRenderTarget();
+LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+#else
 static void glfwErrorCallback(int error, const char* description) {
     std::cerr << "GLFW Error " << error << ": " << description << std::endl;
 }
+#endif
+
 
 void SetupImGuiStyle()
 {
@@ -111,6 +148,34 @@ void SetupImGuiStyle()
 int main(int argc, char** argv) {
     (void)argc; (void)argv;
 
+#ifdef PLATFORM_WINDOWS
+    // Windows DirectX11 initialization
+    WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"walkk", nullptr };
+    ::RegisterClassExW(&wc);
+    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"walkk GUI", WS_OVERLAPPEDWINDOW, 100, 100, 960, 600, nullptr, nullptr, wc.hInstance, nullptr);
+
+    if (!CreateDeviceD3D(hwnd)) {
+        CleanupDeviceD3D();
+        ::UnregisterClassW(wc.lpszClassName, wc.hInstance);
+        return 1;
+    }
+
+    ::ShowWindow(hwnd, SW_SHOWDEFAULT);
+    ::UpdateWindow(hwnd);
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    (void)io;
+    SetupImGuiStyle();
+    ImGui::GetStyle().ScaleAllSizes(1.25f);
+    io.FontGlobalScale = 1.25f;
+
+    ImGui_ImplWin32_Init(hwnd);
+    ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
+
+#else
+    // Linux GLFW+OpenGL initialization
     glfwSetErrorCallback(glfwErrorCallback);
     if (!glfwInit()) return 1;
 
@@ -136,12 +201,12 @@ int main(int argc, char** argv) {
     ImGuiIO& io = ImGui::GetIO();
     (void)io;
     SetupImGuiStyle();
-    // Increase overall UI scale a bit
     ImGui::GetStyle().ScaleAllSizes(1.25f);
     io.FontGlobalScale = 1.25f;
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
+#endif
 
     const int kSinkRate = 48000;
     const int kSinkChannels = 2;
@@ -158,21 +223,35 @@ int main(int argc, char** argv) {
     std::thread loader;
     bool playing = false;
     bool loading = false;
-    int loadResult = -1; // 0 success, non-zero fail
+    int loadResult = -1;
 
-    // Simple cross-platform (ImGui-based) folder browser state
     bool openFolderPopup = false;
     std::filesystem::path browsePath;
     std::string browsePathBuf;
 
-    while (!glfwWindowShouldClose(window)) {
+    bool done = false;
+    while (!done) {
+#ifdef PLATFORM_WINDOWS
+        MSG msg;
+        while (::PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE)) {
+            ::TranslateMessage(&msg);
+            ::DispatchMessage(&msg);
+            if (msg.message == WM_QUIT)
+                done = true;
+        }
+        if (done) break;
+
+        ImGui_ImplDX11_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+#else
+        if (glfwWindowShouldClose(window)) break;
         glfwPollEvents();
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
+#endif
         ImGui::NewFrame();
 
-        // Make main window fill the entire viewport (no decorations or padding)
         ImGuiViewport* viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(viewport->Pos);
         ImGui::SetNextWindowSize(viewport->Size);
@@ -183,16 +262,14 @@ int main(int argc, char** argv) {
             ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings;
         ImGui::Begin("walkk", nullptr, window_flags);
 
-        // C++11+
-static const char* kAsciiArt = R"(.::    .   .::::::.      :::      :::  .   :::  .   
+        static const char* kAsciiArt = R"(.::    .   .::::::.      :::      :::  .   :::  .   
 ';;,  ;;  ;;;' ;;`;;     ;;;      ;;; .;;,.;;; .;;,.
  '[[, [[, [[' ,[[ '[[,   [[[      [[[[[/'  [[[[[/'  
    Y$c$$$c$P c$$$cc$$$c  $$'     _$$$$,   _$$$$,    
     "88"888   888   888,o88oo,.__"888"88o,"888"88o, 
      "M "M"   YMM   ""` """"YUMMM MMM "MMP"MMM "MMP" by gectheory)";
 
-ImGui::TextUnformatted(kAsciiArt);
-
+        ImGui::TextUnformatted(kAsciiArt);
         ImGui::Text("folder of mp3s...");
 
         static char dirBuf[1024] = {0};
@@ -210,7 +287,6 @@ ImGui::TextUnformatted(kAsciiArt);
                 if (!directoryPath.empty() && std::filesystem::is_directory(directoryPath)) {
                     browsePath = std::filesystem::path(directoryPath);
                 } else {
-                    // Try HOME or USERPROFILE, otherwise current_path
                     const char* home = std::getenv("HOME");
                     const char* userprofile = std::getenv("USERPROFILE");
                     if (home && std::filesystem::is_directory(home)) {
@@ -229,7 +305,6 @@ ImGui::TextUnformatted(kAsciiArt);
             ImGui::OpenPopup("Select Folder");
         }
 
-        // Single toggle button: Load & Play (async load)
         if (!playing) {
             if (!loading) {
                 if (ImGui::Button("Load & Play")) {
@@ -264,7 +339,6 @@ ImGui::TextUnformatted(kAsciiArt);
         }
 
         ImGui::Separator();
-        // Loading/queue indicators
         size_t tried = 0, loadedCount = 0;
         {
             std::lock_guard<std::mutex> lk(walkk.loadStatsMutex);
@@ -277,7 +351,6 @@ ImGui::TextUnformatted(kAsciiArt);
             ImGui::Text("Tried: %zu  Loaded: %zu  In set: %zu", tried, loadedCount, walkk.files.size());
         }
 
-        // Auto-start playback when loading completed successfully
         if (!playing && !loading && loadResult == 0 && !walkk.files.empty()) {
             int err = openAndStartStream(&stream, &callbackData, kSinkChannels, kSinkRate, 256);
             if (err == paNoError) {
@@ -289,18 +362,15 @@ ImGui::TextUnformatted(kAsciiArt);
             loadResult = -1;
         }
 
-        // Currently playing grain/file indicators with ETA-aware display
         {
             std::lock_guard<std::mutex> g(walkk.lastGrainMutex);
             if (!walkk.files.empty()) {
-                // Promote to current when ETA passes
                 if (walkk.lastGrain.hasExpectedStart) {
                     auto now = std::chrono::steady_clock::now();
                     if (now >= walkk.lastGrain.expectedStartTime && !walkk.lastGrain.hasStarted) {
                         walkk.lastGrain.hasStarted = true;
                         walkk.currentGrain = walkk.lastGrain;
                     }
-                    // Clear current when its expected end has passed to avoid "stuck" Now
                     if (!walkk.currentGrain.relPath.empty() && walkk.currentGrain.hasExpectedStart) {
                         if (now >= walkk.currentGrain.expectedEndTime) {
                             walkk.currentGrain = Walkk::GrainDebugInfo{};
@@ -309,14 +379,12 @@ ImGui::TextUnformatted(kAsciiArt);
                 }
                 std::string displayName = walkk.lastGrain.relPath;
                 if (displayName.empty()) {
-                    // Try to compute a basename from current file index
                     size_t idx = walkk.lastGrain.fileIndex;
                     if (idx < walkk.files.size()) {
                         const auto &sf = walkk.files[idx];
                         displayName = sf.relPath.empty() ? sf.path : sf.relPath;
                     }
                 }
-                // Current and Next labels: use currentGrain for Now, lastGrain for Next
                 if (!walkk.currentGrain.relPath.empty()) {
                     ImGui::Text("Now: %s", walkk.currentGrain.relPath.c_str());
                 }
@@ -342,7 +410,6 @@ ImGui::TextUnformatted(kAsciiArt);
             }
         }
 
-        // Folder selection modal (ImGui-based, works on Win/Linux/macOS)
         if (openFolderPopup) {
             if (ImGui::BeginPopupModal("Select Folder", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
                 ImGui::Text("Current: %s", browsePath.string().c_str());
@@ -374,7 +441,6 @@ ImGui::TextUnformatted(kAsciiArt);
                         }
                     }
                 } catch (...) {
-                    // ignore errors
                 }
                 ImGui::EndChild();
 
@@ -383,7 +449,6 @@ ImGui::TextUnformatted(kAsciiArt);
         }
 
         ImGui::Separator();
-        // Console-like log history
         ImGui::Text("History");
         ImGui::BeginChild("log", ImVec2(0, 200), true, ImGuiWindowFlags_HorizontalScrollbar);
         {
@@ -397,7 +462,6 @@ ImGui::TextUnformatted(kAsciiArt);
         }
         ImGui::EndChild();
 
-        // Live granular settings (protected by mutex)
         {
             std::lock_guard<std::mutex> lock(walkk.settingsMutex);
             ImGui::Text("Granular Settings");
@@ -454,12 +518,19 @@ ImGui::TextUnformatted(kAsciiArt);
             walkk.settings.whiteNoiseAmplitude = whiteNoiseVol;
         }
 
-        // Play/Stop handled above together with loading
-
         ImGui::PopStyleVar(3);
         ImGui::End();
 
         ImGui::Render();
+
+#ifdef PLATFORM_WINDOWS
+        const float clear_color_with_alpha[4] = { 0.1f, 0.1f, 0.1f, 1.0f };
+        g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
+        g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clear_color_with_alpha);
+        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+
+        g_pSwapChain->Present(1, 0);
+#else
         int display_w, display_h;
         glfwGetFramebufferSize(window, &display_w, &display_h);
         glViewport(0, 0, display_w, display_h);
@@ -467,21 +538,103 @@ ImGui::TextUnformatted(kAsciiArt);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(window);
+#endif
     }
 
-    // Cleanup
     walkk.allFinished.store(true);
     if (producer.joinable()) producer.join();
     if (loader.joinable()) loader.join();
     if (stream) stopAndCloseStream(stream);
 
+#ifdef PLATFORM_WINDOWS
+    ImGui_ImplDX11_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+
+    CleanupDeviceD3D();
+    ::DestroyWindow(hwnd);
+    ::UnregisterClassW(wc.lpszClassName, wc.hInstance);
+#else
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
 
     glfwDestroyWindow(window);
     glfwTerminate();
+#endif
+
     return 0;
 }
 
+#ifdef PLATFORM_WINDOWS
+bool CreateDeviceD3D(HWND hWnd) {
+    DXGI_SWAP_CHAIN_DESC sd;
+    ZeroMemory(&sd, sizeof(sd));
+    sd.BufferCount = 2;
+    sd.BufferDesc.Width = 0;
+    sd.BufferDesc.Height = 0;
+    sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    sd.BufferDesc.RefreshRate.Numerator = 60;
+    sd.BufferDesc.RefreshRate.Denominator = 1;
+    sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+    sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    sd.OutputWindow = hWnd;
+    sd.SampleDesc.Count = 1;
+    sd.SampleDesc.Quality = 0;
+    sd.Windowed = TRUE;
+    sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
 
+    UINT createDeviceFlags = 0;
+    D3D_FEATURE_LEVEL featureLevel;
+    const D3D_FEATURE_LEVEL featureLevelArray[2] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0, };
+    HRESULT res = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, createDeviceFlags, featureLevelArray, 2, D3D11_SDK_VERSION, &sd, &g_pSwapChain, &g_pd3dDevice, &featureLevel, &g_pd3dDeviceContext);
+    if (res == DXGI_ERROR_UNSUPPORTED)
+        res = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, createDeviceFlags, featureLevelArray, 2, D3D11_SDK_VERSION, &sd, &g_pSwapChain, &g_pd3dDevice, &featureLevel, &g_pd3dDeviceContext);
+    if (res != S_OK)
+        return false;
+
+    CreateRenderTarget();
+    return true;
+}
+
+void CleanupDeviceD3D() {
+    CleanupRenderTarget();
+    if (g_pSwapChain) { g_pSwapChain->Release(); g_pSwapChain = nullptr; }
+    if (g_pd3dDeviceContext) { g_pd3dDeviceContext->Release(); g_pd3dDeviceContext = nullptr; }
+    if (g_pd3dDevice) { g_pd3dDevice->Release(); g_pd3dDevice = nullptr; }
+}
+
+void CreateRenderTarget() {
+    ID3D11Texture2D* pBackBuffer;
+    g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer));
+    g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_mainRenderTargetView);
+    pBackBuffer->Release();
+}
+
+void CleanupRenderTarget() {
+    if (g_mainRenderTargetView) { g_mainRenderTargetView->Release(); g_mainRenderTargetView = nullptr; }
+}
+
+LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
+        return true;
+
+    switch (msg) {
+    case WM_SIZE:
+        if (g_pd3dDevice != nullptr && wParam != SIZE_MINIMIZED) {
+            CleanupRenderTarget();
+            g_pSwapChain->ResizeBuffers(0, (UINT)LOWORD(lParam), (UINT)HIWORD(lParam), DXGI_FORMAT_UNKNOWN, 0);
+            CreateRenderTarget();
+        }
+        return 0;
+    case WM_SYSCOMMAND:
+        if ((wParam & 0xfff0) == SC_KEYMENU)
+            return 0;
+        break;
+    case WM_DESTROY:
+        ::PostQuitMessage(0);
+        return 0;
+    }
+    return ::DefWindowProcW(hWnd, msg, wParam, lParam);
+}
+#endif
