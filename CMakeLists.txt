@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(MP3Player)
+project(walkk)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,6 +39,7 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
     GIT_TAG ${IMGUI_TAG}
 )
+
 
 set(GLFW_TAG 3.3.9)
 FetchContent_Declare(
@@ -82,3 +83,63 @@ add_executable(walkk_gui
 )
 target_include_directories(walkk_gui PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(walkk_gui PRIVATE walkk_core imgui_lib glad)
+
+
+# ---- INSTALLATION ----
+# Build shared by default so downstreams can link at runtime
+option(BUILD_SHARED_LIBS "Build shared libraries" ON)
+
+# Public headers
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/ DESTINATION include)
+
+# Binaries and library
+install(TARGETS
+    walkk_cli
+    walkk_gui
+    walkk_core
+    imgui_lib
+    glad
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib64
+    ARCHIVE DESTINATION lib64
+)
+
+# (Optional) Desktop entry for the GUI app
+install(FILES
+    ${CMAKE_SOURCE_DIR}/packaging/walkk-gui.desktop
+    DESTINATION share/applications
+)
+
+# (Optional) An icon if you have one:
+install(FILES ${CMAKE_SOURCE_DIR}/packaging/icons/walkk.png DESTINATION share/icons/hicolor/256x256/apps)
+
+# ---- CPACK (RPM) ----
+include(CPack)
+
+set(CPACK_GENERATOR RPM)
+set(CPACK_PACKAGE_NAME "walkk")
+set(CPACK_PACKAGE_VENDOR "YourOrg")
+set(CPACK_PACKAGE_CONTACT "you@example.com")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "MP3 player with CLI and ImGui/GLFW GUI")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://example.com")
+set(CPACK_PACKAGE_VERSION "1.0.0")
+set(CPACK_RPM_PACKAGE_LICENSE "MIT")
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+
+# Runtime deps (CPack will also autogenerate from ELF, but these help)
+# Adjust names to your distro if needed (Fedora/RHEL shown)
+set(CPACK_RPM_PACKAGE_REQUIRES "portaudio, glfw, libglvnd-glx")
+
+# Optional: split devel files (headers, *.so symlinks) into a -devel subpackage
+set(CPACK_COMPONENTS_ALL runtime devel)
+set(CPACK_COMPONENT_RUNTIME_DISPLAY_NAME "Runtime")
+set(CPACK_COMPONENT_DEVEL_DISPLAY_NAME "Development Files")
+# Put headers & libs-with-symlinks in devel
+cpack_add_component(runtime)
+cpack_add_component(devel)
+
+# Mark which installed paths belong to which component
+# (If you want split packages; otherwise omit COMPONENT … everywhere)
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/ DESTINATION include COMPONENT devel)
+# Libraries (real .so goes to runtime; symlink usually to devel, but simplest is all runtime)
+# If you really want strict split, handle symlink vs real file with generator expressions.
