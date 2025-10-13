@@ -220,8 +220,19 @@ static GrainParams generateRandomGrain(Walkk &walkk) {
     grain.fileIndex = fileDist(walkk.rng);
 
     StreamedFile &file = walkk.files[grain.fileIndex];
+    
+    // Snapshot settings under lock to avoid tearing while generating a grain
+    Walkk::GranularSettings settingsSnapshot;
+    {
+        std::lock_guard<std::mutex> lock(walkk.settingsMutex);
+        settingsSnapshot = walkk.settings;
+    }
 
-    std::uniform_int_distribution<size_t> durationDist(walkk.minGrainMs, walkk.maxGrainMs);
+    if (settingsSnapshot.minGrainMs > settingsSnapshot.maxGrainMs) {
+        std::swap(settingsSnapshot.minGrainMs, settingsSnapshot.maxGrainMs);
+    }
+
+    std::uniform_int_distribution<size_t> durationDist(settingsSnapshot.minGrainMs, settingsSnapshot.maxGrainMs);
     size_t durationMs = durationDist(walkk.rng);
     grain.durationFrames = (durationMs * (size_t)Walkk::kSampleRate) / 1000;
 
@@ -237,13 +248,14 @@ static GrainParams generateRandomGrain(Walkk &walkk) {
     grain.amplitude = ampDist(walkk.rng);
 
     // --- New: decide whether this grain uses looping, and set window/drag ---
-    std::bernoulli_distribution loopDist(std::clamp(walkk.loopProbability, 0.0f, 1.0f));
+    std::bernoulli_distribution loopDist(std::clamp(settingsSnapshot.loopProbability, 0.0f, 1.0f));
     grain.loopEnabled = loopDist(walkk.rng);
 
     if (grain.loopEnabled) {
         // Loop window is randomized per grain
-        std::uniform_int_distribution<size_t> loopWinMsDist(
-            walkk.minLoopWindowMs, walkk.maxLoopWindowMs);
+        size_t minWin = std::min(settingsSnapshot.minLoopWindowMs, settingsSnapshot.maxLoopWindowMs);
+        size_t maxWin = std::max(settingsSnapshot.minLoopWindowMs, settingsSnapshot.maxLoopWindowMs);
+        std::uniform_int_distribution<size_t> loopWinMsDist(minWin, maxWin);
 
         size_t loopWindowMs = loopWinMsDist(walkk.rng);
         // Window is in *source* frames (before resample), we’ll convert right after we know the ratio
@@ -252,7 +264,8 @@ static GrainParams generateRandomGrain(Walkk &walkk) {
         grain.loopWindowFrames = std::max<size_t>(1, (loopWindowMs * (size_t)file.sampleRate) / 1000);
 
         // Drag is signed and also in *source* frames
-        std::uniform_int_distribution<int> dragMsDist(- (int)walkk.maxLoopDragMs, (int)walkk.maxLoopDragMs);
+        int maxDrag = std::max(0, settingsSnapshot.maxLoopDragMs);
+        std::uniform_int_distribution<int> dragMsDist(-maxDrag, maxDrag);
         int dragMs = dragMsDist(walkk.rng);
         grain.loopDragFrames = (int)((int64_t)dragMs * (int64_t)file.sampleRate / 1000);
 
@@ -276,10 +289,17 @@ void granulizerLoop(Walkk *walkk) {
         return;
     }
 
-    const size_t overlapFrames = (walkk->grainOverlapMs * (size_t)Walkk::kSampleRate) / 1000;
+    // Snapshot overlap once; could also be sampled per-grain if desired
+    size_t overlapMsSnapshot;
+    {
+        std::lock_guard<std::mutex> lock(walkk->settingsMutex);
+        overlapMsSnapshot = walkk->settings.grainOverlapMs;
+    }
+    const size_t overlapFrames = (overlapMsSnapshot * (size_t)Walkk::kSampleRate) / 1000;
     (void)overlapFrames;
 
     std::vector<float> grainBuffer;
+    std::vector<float> noiseBuffer;
 
     while (!walkk->allFinished.load()) {
         GrainParams grain = generateRandomGrain(*walkk);
@@ -313,7 +333,39 @@ void granulizerLoop(Walkk *walkk) {
             framesPushed += framesToPush;
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        // Optional white noise between grains
+        size_t noiseMsSnapshot = 0;
+        float noiseAmpSnapshot = 0.25f;
+        {
+            std::lock_guard<std::mutex> lock(walkk->settingsMutex);
+            noiseMsSnapshot = std::min<size_t>(5000, walkk->settings.whiteNoiseMs);
+            noiseAmpSnapshot = std::max(0.0f, std::min(1.0f, walkk->settings.whiteNoiseAmplitude));
+        }
+
+        if (noiseMsSnapshot > 0) {
+            size_t noiseFrames = (noiseMsSnapshot * (size_t)Walkk::kSampleRate) / 1000;
+            noiseBuffer.resize(noiseFrames * (size_t)Walkk::kChannels);
+
+            std::uniform_real_distribution<float> noiseDist(-noiseAmpSnapshot, noiseAmpSnapshot);
+            for (size_t f = 0; f < noiseFrames; ++f) {
+                float nL = noiseDist(walkk->rng);
+                float nR = noiseDist(walkk->rng);
+                noiseBuffer[f * 2 + 0] = nL;
+                noiseBuffer[f * 2 + 1] = nR;
+            }
+
+            size_t pushed = 0;
+            size_t samplesToPush = noiseFrames * (size_t)Walkk::kChannels;
+            while (pushed < samplesToPush) {
+                pushed += walkk->sink.push(noiseBuffer.data() + pushed,
+                                           samplesToPush - pushed);
+                if (pushed < samplesToPush) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+            }
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
     }
 
     walkk->sink.finished.store(true);

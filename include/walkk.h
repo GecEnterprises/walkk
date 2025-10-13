@@ -4,6 +4,7 @@
 #include <atomic>
 #include <random>
 #include <string>
+#include <mutex>
 
 #include "minimp3_ex.h"
 #include "pa_sink.h"
@@ -78,19 +79,20 @@ struct Walkk {
     std::vector<StreamedFile> files;
     std::atomic<bool> allFinished;
 
-    // Grain parameters (configurable)
-    size_t minGrainMs = 50;      // Min grain duration in milliseconds
-    size_t maxGrainMs = 1200;     // Max grain duration in milliseconds
-    size_t grainOverlapMs = 20;  // Overlap between grains in milliseconds
-    size_t maxConcurrentGrains = 4;
+    struct GranularSettings {
+        size_t minGrainMs = 50;
+        size_t maxGrainMs = 1200;
+        size_t grainOverlapMs = 20;
+        size_t maxConcurrentGrains = 4;
+        float  loopProbability = 0.0f; // 0..1
+        size_t minLoopWindowMs = 20;
+        size_t maxLoopWindowMs = 620;
+        int    maxLoopDragMs   = 25;   // ± ms
+        size_t whiteNoiseMs    = 0;    // silence replaced by white noise between grains
+        float  whiteNoiseAmplitude = 0.25f; // 0..1 amplitude for noise
+    } settings;
 
-    // New: global controls for loop behavior
-    float  loopProbability = 0.0f;  // 0..1, exposed externally
-
-    // Loop window & drag ranges (in milliseconds / frames domain described below)
-    size_t minLoopWindowMs = 20;     // typical tiny windows feel “scrubby”
-    size_t maxLoopWindowMs = 620;
-    int    maxLoopDragMs   = 25;     // ± range for drag
+    std::mutex settingsMutex;
 
     // Random number generator
     std::mt19937 rng;
