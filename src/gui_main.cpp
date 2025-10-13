@@ -168,8 +168,8 @@ int main(int argc, char** argv) {
     ImGuiIO& io = ImGui::GetIO();
     (void)io;
     SetupImGuiStyle();
-    ImGui::GetStyle().ScaleAllSizes(1.25f);
-    io.FontGlobalScale = 1.25f;
+    ImGui::GetStyle().ScaleAllSizes(1.0f);
+    io.FontGlobalScale = 1.0f;
 
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
@@ -201,8 +201,8 @@ int main(int argc, char** argv) {
     ImGuiIO& io = ImGui::GetIO();
     (void)io;
     SetupImGuiStyle();
-    ImGui::GetStyle().ScaleAllSizes(1.25f);
-    io.FontGlobalScale = 1.25f;
+    ImGui::GetStyle().ScaleAllSizes(1.0f);
+    io.FontGlobalScale = 1.0f;
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
