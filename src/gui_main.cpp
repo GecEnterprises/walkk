@@ -183,7 +183,16 @@ int main(int argc, char** argv) {
             ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings;
         ImGui::Begin("walkk", nullptr, window_flags);
 
-        
+        // C++11+
+static const char* kAsciiArt = R"(.::    .   .::::::.      :::      :::  .   :::  .   
+';;,  ;;  ;;;' ;;`;;     ;;;      ;;; .;;,.;;; .;;,.
+ '[[, [[, [[' ,[[ '[[,   [[[      [[[[[/'  [[[[[/'  
+   Y$c$$$c$P c$$$cc$$$c  $$'     _$$$$,   _$$$$,    
+    "88"888   888   888,o88oo,.__"888"88o,"888"88o, 
+     "M "M"   YMM   ""` """"YUMMM MMM "MMP"MMM "MMP" by gectheory)";
+
+ImGui::TextUnformatted(kAsciiArt);
+
         ImGui::Text("folder of mp3s...");
 
         static char dirBuf[1024] = {0};
