@@ -352,7 +352,7 @@ void granulizerLoop(Walkk *walkk) {
 
         {
             std::string fname = (grain.fileIndex < walkk->files.size()) ? walkk->files[grain.fileIndex].relPath : std::string("?");
-            std::string gmsg = "Grain file=" + std::to_string(grain.fileIndex) +
+            std::string gmsg = "next>>>" + std::to_string(grain.fileIndex) +
                                " (" + fname + ") start=" + std::to_string(grain.startFrame) +
                                " dur=" + std::to_string(grain.durationFrames) + "f" +
                                " amp=" + std::to_string(grain.amplitude) +
@@ -396,6 +396,8 @@ void granulizerLoop(Walkk *walkk) {
         const size_t chunkFrames = 512;
         size_t framesPushed = 0;
 
+        // On first push, estimate when these samples will reach audio out based on queue depth
+        bool startEstimated = false;
         while (framesPushed < grain.durationFrames) {
             size_t framesToPush = std::min(chunkFrames, grain.durationFrames - framesPushed);
             size_t sampleOffset = framesPushed * (size_t)Walkk::kChannels;
@@ -403,6 +405,23 @@ void granulizerLoop(Walkk *walkk) {
 
             size_t pushed = 0;
             while (pushed < samplesToPush) {
+                if (!startEstimated) {
+                    size_t queued = walkk->sink.getQueuedSamples();
+                    double secondsQueue = (double)queued / (double)(Walkk::kSampleRate * Walkk::kChannels);
+                    auto eta = std::chrono::steady_clock::now() + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                        std::chrono::duration<double>(secondsQueue));
+                    {
+                        std::lock_guard<std::mutex> g(walkk->lastGrainMutex);
+                        walkk->lastGrain.expectedStartTime = eta;
+                        walkk->lastGrain.hasExpectedStart = true;
+                        walkk->lastGrain.hasStarted = false;
+                        // Estimated end time = start + duration
+                        double secondsDur = (double)grain.durationFrames / (double)Walkk::kSampleRate;
+                        walkk->lastGrain.expectedEndTime = eta + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                            std::chrono::duration<double>(secondsDur));
+                    }
+                    startEstimated = true;
+                }
                 pushed += walkk->sink.push(grainBuffer.data() + sampleOffset + pushed,
                                            samplesToPush - pushed);
                 if (pushed < samplesToPush) {

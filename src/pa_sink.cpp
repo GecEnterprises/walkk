@@ -25,6 +25,11 @@ size_t AudioSink::push(const float *in, size_t numSamples) {
 	return toCopy;
 }
 
+size_t AudioSink::getQueuedSamples() {
+	std::lock_guard<std::mutex> lock(mutex);
+	return queue.size();
+}
+
 static int paCallback(const void *inputBuffer, void *outputBuffer,
 						unsigned long framesPerBuffer,
 						const PaStreamCallbackTimeInfo* timeInfo,

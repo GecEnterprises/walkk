@@ -35,6 +35,7 @@ struct StreamedFile {
 	// Allow moving
 	StreamedFile(StreamedFile&& other) noexcept 
 		: path(std::move(other.path))
+		, relPath(std::move(other.relPath))
 		, decoder(other.decoder)
 		, totalFrames(other.totalFrames)
 		, sampleRate(other.sampleRate)
@@ -49,6 +50,7 @@ struct StreamedFile {
 				mp3dec_ex_close(&decoder);
 			}
 			path = std::move(other.path);
+			relPath = std::move(other.relPath);
 			decoder = other.decoder;
 			totalFrames = other.totalFrames;
 			sampleRate = other.sampleRate;
@@ -112,8 +114,16 @@ struct Walkk {
         bool loopEnabled = false;
         size_t loopWindowFrames = 0;
         int loopDragFrames = 0;
+        // Estimated audio-out start time for this grain (steady_clock)
+        std::chrono::steady_clock::time_point expectedStartTime;
+        bool hasExpectedStart = false;
+        bool hasStarted = false;
+        std::chrono::steady_clock::time_point expectedEndTime;
     } lastGrain;
     std::mutex lastGrainMutex;
+
+    // Explicit current-playing grain snapshot (promoted when ETA is reached)
+    GrainDebugInfo currentGrain;
 
     // Console-like log buffer for GUI history
     std::deque<std::string> logLines;

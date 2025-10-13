@@ -16,6 +16,9 @@ struct AudioSink {
 
 	size_t pop(float *out, size_t maxSamples);
 	size_t push(const float *in, size_t numSamples);
+
+	// Thread-safe query of queued samples
+	size_t getQueuedSamples();
 };
 
 struct CallbackData {

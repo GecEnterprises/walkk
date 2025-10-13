@@ -144,10 +144,24 @@ int main(int argc, char** argv) {
             loadResult = -1;
         }
 
-        // Currently playing grain/file indicators (hide "pending")
+        // Currently playing grain/file indicators with ETA-aware display
         {
             std::lock_guard<std::mutex> g(walkk.lastGrainMutex);
             if (!walkk.files.empty()) {
+                // Promote to current when ETA passes
+                if (walkk.lastGrain.hasExpectedStart) {
+                    auto now = std::chrono::steady_clock::now();
+                    if (now >= walkk.lastGrain.expectedStartTime && !walkk.lastGrain.hasStarted) {
+                        walkk.lastGrain.hasStarted = true;
+                        walkk.currentGrain = walkk.lastGrain;
+                    }
+                    // Clear current when its expected end has passed to avoid "stuck" Now
+                    if (!walkk.currentGrain.relPath.empty() && walkk.currentGrain.hasExpectedStart) {
+                        if (now >= walkk.currentGrain.expectedEndTime) {
+                            walkk.currentGrain = Walkk::GrainDebugInfo{};
+                        }
+                    }
+                }
                 std::string displayName = walkk.lastGrain.relPath;
                 if (displayName.empty()) {
                     // Try to compute a basename from current file index
@@ -157,8 +171,20 @@ int main(int argc, char** argv) {
                         displayName = sf.relPath.empty() ? sf.path : sf.relPath;
                     }
                 }
+                // Current and Next labels: use currentGrain for Now, lastGrain for Next
+                if (!walkk.currentGrain.relPath.empty()) {
+                    ImGui::Text("Now: %s", walkk.currentGrain.relPath.c_str());
+                }
                 if (!displayName.empty()) {
-                    ImGui::Text("Now: %s", displayName.c_str());
+                    auto now = std::chrono::steady_clock::now();
+                    if (walkk.lastGrain.hasExpectedStart && now < walkk.lastGrain.expectedStartTime) {
+                        auto msLeft = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            walkk.lastGrain.expectedStartTime - now).count();
+                        if (msLeft < 0) msLeft = 0;
+                        ImGui::Text("Next: %s in %lld ms", displayName.c_str(), (long long)msLeft);
+                    } else if (!walkk.lastGrain.hasStarted) {
+                        ImGui::Text("Next: %s", displayName.c_str());
+                    }
                 }
                 ImGui::Text("Grain: start=%zu frames  dur=%zu frames  amp=%.2f",
                     walkk.lastGrain.startFrame,
