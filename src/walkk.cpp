@@ -6,6 +6,7 @@
 #include <random>
 #include <cmath>
 #include <vector>
+#include <numbers>
 
 #include "minimp3_ex.h"
 #include "walkk.h"
@@ -109,7 +110,7 @@ int loadDirectoryMp3s(const char *directoryPath, Walkk &walkk, bool recursive) {
 static void applyGrainEnvelope(float *samples, size_t numFrames, size_t channels) {
     for (size_t i = 0; i < numFrames; i++) {
         float t = (numFrames > 1) ? (float)i / (float)(numFrames - 1) : 0.0f;
-        float envelope = 0.5f * (1.0f - std::cos(2.0f * M_PI * t));
+        float envelope = 0.5f * (1.0f - std::cos(2.0f * std::numbers::pi * t));
         for (size_t ch = 0; ch < channels; ch++) {
             samples[i * channels + ch] *= envelope;
         }
