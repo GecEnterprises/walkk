@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 project(MP3Player)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Find PortAudio
@@ -15,6 +15,9 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 # Add executable
 add_executable(mp3player
     src/main.cpp
+    src/audio_file.cpp
+    src/pa_sink.cpp
+    src/walkk.cpp
 )
 
 # Link libraries
