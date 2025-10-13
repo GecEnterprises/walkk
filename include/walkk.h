@@ -5,6 +5,7 @@
 #include <random>
 #include <string>
 #include <mutex>
+#include <deque>
 
 #include "minimp3_ex.h"
 #include "pa_sink.h"
@@ -12,6 +13,7 @@
 // Stream-based file info (no full buffer loaded)
 struct StreamedFile {
 	std::string path;
+	std::string relPath; // path relative to last loaded base directory
 	mp3dec_ex_t decoder;
 	size_t totalFrames;
 	int sampleRate;
@@ -79,6 +81,12 @@ struct Walkk {
     std::vector<StreamedFile> files;
     std::atomic<bool> allFinished;
 
+    // Last loaded directory and counts
+    std::string baseDirectory;
+    size_t filesAttemptedLastLoad = 0; // how many files we tried to load (matching extension)
+    size_t filesLoadedLast = 0;        // how many successfully opened
+    std::mutex loadStatsMutex;         // guard the counters during background loading
+
     struct GranularSettings {
         size_t minGrainMs = 50;
         size_t maxGrainMs = 1200;
@@ -93,6 +101,26 @@ struct Walkk {
     } settings;
 
     std::mutex settingsMutex;
+
+    // Debug/status of the most recently generated grain (for GUI display)
+    struct GrainDebugInfo {
+        size_t fileIndex = 0;
+        std::string relPath;
+        size_t startFrame = 0;
+        size_t durationFrames = 0;
+        float amplitude = 0.0f;
+        bool loopEnabled = false;
+        size_t loopWindowFrames = 0;
+        int loopDragFrames = 0;
+    } lastGrain;
+    std::mutex lastGrainMutex;
+
+    // Console-like log buffer for GUI history
+    std::deque<std::string> logLines;
+    std::mutex logMutex;
+    size_t logMaxLines = 2000;
+
+    void addLog(const std::string &line);
 
     // Random number generator
     std::mt19937 rng;

@@ -60,7 +60,10 @@ int main(int argc, char** argv) {
     CallbackData callbackData{ &walkk.sink, kSinkChannels };
     PaStream* stream = nullptr;
     std::thread producer;
+    std::thread loader;
     bool playing = false;
+    bool loading = false;
+    int loadResult = -1; // 0 success, non-zero fail
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -81,13 +84,107 @@ int main(int argc, char** argv) {
         ImGui::SameLine();
         ImGui::Checkbox("Recursive", &recursive);
 
-        if (ImGui::Button("Load")) {
-            walkk.files.clear();
-            loaded = (directoryPath.size() > 0) && (loadDirectoryMp3s(directoryPath.c_str(), walkk, recursive) == 0);
+        // Single toggle button: Load & Play (async load)
+        if (!playing) {
+            if (!loading) {
+                if (ImGui::Button("Load & Play")) {
+                    if (loader.joinable()) loader.join();
+                    walkk.files.clear();
+                    loading = true;
+                    loadResult = -1;
+                    loader = std::thread([&walkk, &loading, &loadResult, directoryPath, recursive]() {
+                        int res = 1;
+                        if (!directoryPath.empty()) {
+                            res = loadDirectoryMp3s(directoryPath.c_str(), walkk, recursive);
+                        }
+                        loadResult = res;
+                        loading = false;
+                    });
+                }
+            } else {
+                ImGui::BeginDisabled();
+                ImGui::Button("Loading...");
+                ImGui::EndDisabled();
+            }
+        } else {
+            if (ImGui::Button("Stop")) {
+                walkk.allFinished.store(true);
+                if (producer.joinable()) producer.join();
+                if (stream) {
+                    stopAndCloseStream(stream);
+                    stream = nullptr;
+                }
+                playing = false;
+            }
         }
 
         ImGui::Separator();
-        ImGui::Text("%zu files", walkk.files.size());
+        // Loading/queue indicators
+        size_t tried = 0, loadedCount = 0;
+        {
+            std::lock_guard<std::mutex> lk(walkk.loadStatsMutex);
+            tried = walkk.filesAttemptedLastLoad;
+            loadedCount = walkk.filesLoadedLast;
+        }
+        if (loading) {
+            ImGui::Text("Loading... Tried: %zu  Loaded: %zu", tried, loadedCount);
+        } else {
+            ImGui::Text("Tried: %zu  Loaded: %zu  In set: %zu", tried, loadedCount, walkk.files.size());
+        }
+
+        // Auto-start playback when loading completed successfully
+        if (!playing && !loading && loadResult == 0 && !walkk.files.empty()) {
+            int err = openAndStartStream(&stream, &callbackData, kSinkChannels, kSinkRate, 256);
+            if (err == paNoError) {
+                playing = true;
+                walkk.allFinished.store(false);
+                if (producer.joinable()) producer.join();
+                producer = std::thread([&walkk]() { granulizerLoop(&walkk); });
+            }
+            loadResult = -1;
+        }
+
+        // Currently playing grain/file indicators (hide "pending")
+        {
+            std::lock_guard<std::mutex> g(walkk.lastGrainMutex);
+            if (!walkk.files.empty()) {
+                std::string displayName = walkk.lastGrain.relPath;
+                if (displayName.empty()) {
+                    // Try to compute a basename from current file index
+                    size_t idx = walkk.lastGrain.fileIndex;
+                    if (idx < walkk.files.size()) {
+                        const auto &sf = walkk.files[idx];
+                        displayName = sf.relPath.empty() ? sf.path : sf.relPath;
+                    }
+                }
+                if (!displayName.empty()) {
+                    ImGui::Text("Now: %s", displayName.c_str());
+                }
+                ImGui::Text("Grain: start=%zu frames  dur=%zu frames  amp=%.2f",
+                    walkk.lastGrain.startFrame,
+                    walkk.lastGrain.durationFrames,
+                    walkk.lastGrain.amplitude);
+                ImGui::Text("Loop: %s  win=%zu fr  drag=%d fr",
+                    walkk.lastGrain.loopEnabled ? "on" : "off",
+                    walkk.lastGrain.loopWindowFrames,
+                    walkk.lastGrain.loopDragFrames);
+            }
+        }
+
+        ImGui::Separator();
+        // Console-like log history
+        ImGui::Text("History");
+        ImGui::BeginChild("log", ImVec2(0, 200), true, ImGuiWindowFlags_HorizontalScrollbar);
+        {
+            std::lock_guard<std::mutex> lg(walkk.logMutex);
+            for (const auto &line : walkk.logLines) {
+                ImGui::TextUnformatted(line.c_str());
+            }
+            if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
+                ImGui::SetScrollHereY(1.0f);
+            }
+        }
+        ImGui::EndChild();
 
         // Live granular settings (protected by mutex)
         {
@@ -146,26 +243,7 @@ int main(int argc, char** argv) {
             walkk.settings.whiteNoiseAmplitude = whiteNoiseVol;
         }
 
-        if (!playing) {
-            if (ImGui::Button("Play") && loaded && !walkk.files.empty()) {
-                int err = openAndStartStream(&stream, &callbackData, kSinkChannels, kSinkRate, 256);
-                if (err == paNoError) {
-                    playing = true;
-                    walkk.allFinished.store(false);
-                    producer = std::thread([&walkk]() { granulizerLoop(&walkk); });
-                }
-            }
-        } else {
-            if (ImGui::Button("Stop")) {
-                walkk.allFinished.store(true);
-                if (producer.joinable()) producer.join();
-                if (stream) {
-                    stopAndCloseStream(stream);
-                    stream = nullptr;
-                }
-                playing = false;
-            }
-        }
+        // Play/Stop handled above together with loading
 
         ImGui::End();
 
@@ -182,6 +260,7 @@ int main(int argc, char** argv) {
     // Cleanup
     walkk.allFinished.store(true);
     if (producer.joinable()) producer.join();
+    if (loader.joinable()) loader.join();
     if (stream) stopAndCloseStream(stream);
 
     ImGui_ImplOpenGL3_Shutdown();

@@ -12,8 +12,23 @@
 
 namespace fs = std::filesystem;
 
+void Walkk::addLog(const std::string &line) {
+    std::lock_guard<std::mutex> lg(logMutex);
+    logLines.push_back(line);
+    while (logLines.size() > logMaxLines) {
+        logLines.pop_front();
+    }
+}
+
 int loadDirectoryMp3s(const char *directoryPath, Walkk &walkk, bool recursive) {
     try {
+        walkk.baseDirectory = directoryPath ? std::string(directoryPath) : std::string();
+        {
+            std::lock_guard<std::mutex> lk(walkk.loadStatsMutex);
+            walkk.filesAttemptedLastLoad = 0;
+            walkk.filesLoadedLast = 0;
+        }
+
         auto handleEntry = [&](const fs::directory_entry &entry) {
             if (!entry.is_regular_file()) return;
             auto path = entry.path();
@@ -22,8 +37,19 @@ int loadDirectoryMp3s(const char *directoryPath, Walkk &walkk, bool recursive) {
             std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
             if (ext != ".mp3") return;
 
+            {
+                std::lock_guard<std::mutex> lk(walkk.loadStatsMutex);
+                walkk.filesAttemptedLastLoad++;
+            }
+
             StreamedFile file;
             file.path = path.string();
+            // Compute relative path for GUI display
+            try {
+                file.relPath = fs::relative(path, walkk.baseDirectory).string();
+            } catch (...) {
+                file.relPath = path.filename().string();
+            }
 
             // Open briefly to read metadata, then close to avoid pinning memory per file
             if (mp3dec_ex_open(&file.decoder, file.path.c_str(), MP3D_SEEK_TO_SAMPLE) == 0) {
@@ -37,10 +63,18 @@ int loadDirectoryMp3s(const char *directoryPath, Walkk &walkk, bool recursive) {
                 file.isOpen = false;
 
                 walkk.files.push_back(std::move(file));
-                std::cout << "Loaded: " << path.string()
-                          << " (" << walkk.files.back().totalFrames << " frames)" << std::endl;
+                {
+                    std::lock_guard<std::mutex> lk(walkk.loadStatsMutex);
+                    walkk.filesLoadedLast++;
+                }
+                std::string msg = std::string("Loaded: ") + path.string() +
+                                   " (" + std::to_string(walkk.files.back().totalFrames) + " frames)";
+                std::cout << msg << std::endl;
+                walkk.addLog(msg);
             } else {
-                std::cerr << "Failed to load: " << path.string() << std::endl;
+                std::string msg = std::string("Failed to load: ") + path.string();
+                std::cerr << msg << std::endl;
+                walkk.addLog(msg);
             }
         };
 
@@ -53,9 +87,21 @@ int loadDirectoryMp3s(const char *directoryPath, Walkk &walkk, bool recursive) {
                 handleEntry(entry);
             }
         }
+        size_t tried = 0, loaded = 0;
+        {
+            std::lock_guard<std::mutex> lk(walkk.loadStatsMutex);
+            tried = walkk.filesAttemptedLastLoad;
+            loaded = walkk.filesLoadedLast;
+        }
+        std::string sum = "Scan complete. Tried=" + std::to_string(tried) +
+                          " loaded=" + std::to_string(loaded);
+        std::cout << sum << std::endl;
+        walkk.addLog(sum);
         return walkk.files.empty() ? 1 : 0;
     } catch (const std::exception &e) {
-        std::cerr << "Error reading directory: " << e.what() << std::endl;
+        std::string msg = std::string("Error reading directory: ") + e.what();
+        std::cerr << msg << std::endl;
+        walkk.addLog(msg);
         return 1;
     }
 }
@@ -304,9 +350,43 @@ void granulizerLoop(Walkk *walkk) {
     while (!walkk->allFinished.load()) {
         GrainParams grain = generateRandomGrain(*walkk);
 
-        std::cout << "Grain: file=" << grain.fileIndex
-                  << " start=" << grain.startFrame
-                  << " dur=" << grain.durationFrames << "f" << std::endl;
+        {
+            std::string fname = (grain.fileIndex < walkk->files.size()) ? walkk->files[grain.fileIndex].relPath : std::string("?");
+            std::string gmsg = "Grain file=" + std::to_string(grain.fileIndex) +
+                               " (" + fname + ") start=" + std::to_string(grain.startFrame) +
+                               " dur=" + std::to_string(grain.durationFrames) + "f" +
+                               " amp=" + std::to_string(grain.amplitude) +
+                               (grain.loopEnabled ? " loop=on" : " loop=off");
+            std::cout << gmsg << std::endl;
+            walkk->addLog(gmsg);
+        }
+
+        // Update last grain debug info for GUI
+        {
+            std::lock_guard<std::mutex> g(walkk->lastGrainMutex);
+            walkk->lastGrain.fileIndex = grain.fileIndex;
+            if (grain.fileIndex < walkk->files.size()) {
+                const auto &sf = walkk->files[grain.fileIndex];
+                if (!sf.relPath.empty()) {
+                    walkk->lastGrain.relPath = sf.relPath;
+                } else {
+                    // Fallback to basename if relPath missing
+                    try {
+                        walkk->lastGrain.relPath = fs::path(sf.path).filename().string();
+                    } catch (...) {
+                        walkk->lastGrain.relPath = sf.path;
+                    }
+                }
+            } else {
+                walkk->lastGrain.relPath.clear();
+            }
+            walkk->lastGrain.startFrame = grain.startFrame;
+            walkk->lastGrain.durationFrames = grain.durationFrames;
+            walkk->lastGrain.amplitude = grain.amplitude;
+            walkk->lastGrain.loopEnabled = grain.loopEnabled;
+            walkk->lastGrain.loopWindowFrames = grain.loopWindowFrames;
+            walkk->lastGrain.loopDragFrames = grain.loopDragFrames;
+        }
 
         if (!readGrain(walkk->files[grain.fileIndex], grain, grainBuffer, Walkk::kSampleRate)) {
             std::cerr << "Failed to read grain" << std::endl;
