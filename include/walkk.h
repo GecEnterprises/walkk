@@ -101,7 +101,8 @@ struct Walkk {
 
 
 // Load all .mp3 files from directoryPath into walkk.files (streaming mode)
-int loadDirectoryMp3s(const char *directoryPath, Walkk &walkk);
+// If recursive is true, traverse subdirectories recursively.
+int loadDirectoryMp3s(const char *directoryPath, Walkk &walkk, bool recursive = false);
 
 // Producer loop: granulizer that plays random segments from random files
 void granulizerLoop(Walkk *walkk);

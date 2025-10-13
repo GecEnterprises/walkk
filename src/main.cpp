@@ -1,30 +1,47 @@
 #include <iostream>
 #include <vector>
-#include <cmath>
 #include <thread>
-#include <chrono>
-#include "audio_file.h"
 #include "pa_sink.h"
 #include "walkk.h"
-
-// Audio data handled via AudioFile (see audio_file.h)
 
 // PortAudio plumbing moved to pa_sink.{h,cpp}
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <directory_with_mp3s>" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " [--recursive|-r] <directory_with_mp3s>" << std::endl;
         return 1;
     }
-    
-    const char *filename = argv[1];
+
+    bool recursive = false;
+    const char *directory = nullptr;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg(argv[i]);
+        if (arg == "--recursive" || arg == "-r") {
+            recursive = true;
+        } else if (arg.size() > 0 && arg[0] == '-') {
+            std::cerr << "Unknown option: " << arg << std::endl;
+            std::cerr << "Usage: " << argv[0] << " [--recursive|-r] <directory_with_mp3s>" << std::endl;
+            return 1;
+        } else if (directory == nullptr) {
+            directory = argv[i];
+        } else {
+            std::cerr << "Unexpected argument: " << arg << std::endl;
+            std::cerr << "Usage: " << argv[0] << " [--recursive|-r] <directory_with_mp3s>" << std::endl;
+            return 1;
+        }
+    }
+
+    if (directory == nullptr) {
+        std::cerr << "Usage: " << argv[0] << " [--recursive|-r] <directory_with_mp3s>" << std::endl;
+        return 1;
+    }
     // Create Walkk with fixed sink and load directory of mp3s
     const int kSinkRate = 48000;
     const int kSinkChannels = 2;
     const size_t sinkCapacity = (size_t)kSinkRate * (size_t)kSinkChannels * 2; // ~2 seconds
     Walkk walkk(sinkCapacity);
-    if (loadDirectoryMp3s(filename, walkk) != 0 || walkk.files.empty()) {
-        std::cerr << "No MP3 files loaded from directory: " << filename << std::endl;
+    if (loadDirectoryMp3s(directory, walkk, recursive) != 0 || walkk.files.empty()) {
+        std::cerr << "No MP3 files loaded from directory: " << directory << std::endl;
         return 1;
     }
     CallbackData callbackData{ &walkk.sink, kSinkChannels };

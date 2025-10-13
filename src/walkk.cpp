@@ -12,31 +12,45 @@
 
 namespace fs = std::filesystem;
 
-int loadDirectoryMp3s(const char *directoryPath, Walkk &walkk) {
+int loadDirectoryMp3s(const char *directoryPath, Walkk &walkk, bool recursive) {
     try {
-        for (const auto &entry : fs::directory_iterator(directoryPath)) {
-            if (!entry.is_regular_file()) continue;
+        auto handleEntry = [&](const fs::directory_entry &entry) {
+            if (!entry.is_regular_file()) return;
             auto path = entry.path();
-            if (path.has_extension()) {
-                auto ext = path.extension().string();
-                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                if (ext == ".mp3") {
-                    StreamedFile file;
-                    file.path = path.string();
+            if (!path.has_extension()) return;
+            auto ext = path.extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            if (ext != ".mp3") return;
 
-                    if (mp3dec_ex_open(&file.decoder, file.path.c_str(), MP3D_SEEK_TO_SAMPLE) == 0) {
-                        file.sampleRate = file.decoder.info.hz;
-                        file.channels = file.decoder.info.channels;
-                        file.totalFrames = file.decoder.samples / file.channels;
-                        file.isOpen = true;
+            StreamedFile file;
+            file.path = path.string();
 
-                        walkk.files.push_back(std::move(file));
-                        std::cout << "Loaded: " << path.filename().string()
-                                  << " (" << walkk.files.back().totalFrames << " frames)" << std::endl;
-                    } else {
-                        std::cerr << "Failed to load: " << path.string() << std::endl;
-                    }
-                }
+            // Open briefly to read metadata, then close to avoid pinning memory per file
+            if (mp3dec_ex_open(&file.decoder, file.path.c_str(), MP3D_SEEK_TO_SAMPLE) == 0) {
+                file.sampleRate = file.decoder.info.hz;
+                file.channels = file.decoder.info.channels;
+                file.totalFrames = file.decoder.samples / std::max(1, file.channels);
+                file.isOpen = true;
+
+                // Immediately close; we will reopen on-demand when reading grains
+                mp3dec_ex_close(&file.decoder);
+                file.isOpen = false;
+
+                walkk.files.push_back(std::move(file));
+                std::cout << "Loaded: " << path.string()
+                          << " (" << walkk.files.back().totalFrames << " frames)" << std::endl;
+            } else {
+                std::cerr << "Failed to load: " << path.string() << std::endl;
+            }
+        };
+
+        if (recursive) {
+            for (const auto &entry : fs::recursive_directory_iterator(directoryPath)) {
+                handleEntry(entry);
+            }
+        } else {
+            for (const auto &entry : fs::directory_iterator(directoryPath)) {
+                handleEntry(entry);
             }
         }
         return walkk.files.empty() ? 1 : 0;
@@ -57,7 +71,18 @@ static void applyGrainEnvelope(float *samples, size_t numFrames, size_t channels
 }
 
 static bool readGrain(StreamedFile &file, GrainParams &params, std::vector<float> &output, int targetRate) {
-    if (!file.isOpen) return false;
+    // Lazily open decoder if needed to keep memory footprint low across many files
+    bool openedHere = false;
+    if (!file.isOpen) {
+        if (mp3dec_ex_open(&file.decoder, file.path.c_str(), MP3D_SEEK_TO_SAMPLE) != 0) {
+            return false;
+        }
+        file.sampleRate = file.decoder.info.hz;
+        file.channels = file.decoder.info.channels;
+        file.totalFrames = file.decoder.samples / std::max(1, file.channels);
+        file.isOpen = true;
+        openedHere = true;
+    }
 
     // Resample ratio: src -> dst
     double rateRatio = (double)file.sampleRate / (double)targetRate;
@@ -94,13 +119,23 @@ static bool readGrain(StreamedFile &file, GrainParams &params, std::vector<float
     // Seek & read the contiguous source slice
     uint64_t seekSample = (uint64_t)readStart * (uint64_t)file.channels;
     if (mp3dec_ex_seek(&file.decoder, seekSample) != 0) {
+        if (openedHere) {
+            mp3dec_ex_close(&file.decoder);
+            file.isOpen = false;
+        }
         return false;
     }
 
     std::vector<mp3d_sample_t> srcBuffer(readFrames * (size_t)file.channels);
     size_t samplesRead = mp3dec_ex_read(&file.decoder, srcBuffer.data(), readFrames * (size_t)file.channels);
     size_t framesRead  = samplesRead / (size_t)file.channels;
-    if (framesRead < 2) return false;
+    if (framesRead < 2) {
+        if (openedHere) {
+            mp3dec_ex_close(&file.decoder);
+            file.isOpen = false;
+        }
+        return false;
+    }
 
     // Helpers to clamp mapped indices into [0, framesRead-1] of our local buffer
     auto clampLocal = [&](int64_t f) -> size_t {
@@ -168,6 +203,12 @@ static bool readGrain(StreamedFile &file, GrainParams &params, std::vector<float
     }
 
     // applyGrainEnvelope(output.data(), params.durationFrames, 2);
+
+    // Close decoder if we opened it for this grain to avoid keeping many files mapped
+    if (openedHere) {
+        mp3dec_ex_close(&file.decoder);
+        file.isOpen = false;
+    }
     return true;
 }
 
