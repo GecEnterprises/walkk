@@ -10,6 +10,10 @@
 
 #include "minimp3_ex.h"
 #include "walkk.h"
+#ifdef _WIN32
+#define NOMINMAX  // Prevent Windows from defining min/max macros
+#include <windows.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -23,6 +27,16 @@ void Walkk::addLog(const std::string &line) {
 
 int loadDirectoryMp3s(const char *directoryPath, Walkk &walkk, bool recursive) {
     try {
+        // Convert input path to wide string for Windows
+        std::wstring wDirectoryPath;
+        if (directoryPath) {
+            int wlen = MultiByteToWideChar(CP_UTF8, 0, directoryPath, -1, nullptr, 0);
+            if (wlen > 0) {
+                wDirectoryPath.resize(wlen - 1);
+                MultiByteToWideChar(CP_UTF8, 0, directoryPath, -1, &wDirectoryPath[0], wlen);
+            }
+        }
+        
         walkk.baseDirectory = directoryPath ? std::string(directoryPath) : std::string();
         {
             std::lock_guard<std::mutex> lk(walkk.loadStatsMutex);
@@ -44,12 +58,49 @@ int loadDirectoryMp3s(const char *directoryPath, Walkk &walkk, bool recursive) {
             }
 
             StreamedFile file;
+            
+            // Convert path to UTF-8 string for storage and passing to minimp3
+            #ifdef _WIN32
+            std::wstring wpath = path.wstring();
+            int len = WideCharToMultiByte(CP_UTF8, 0, wpath.c_str(), -1, nullptr, 0, nullptr, nullptr);
+            if (len > 0) {
+                file.path.resize(len - 1);
+                WideCharToMultiByte(CP_UTF8, 0, wpath.c_str(), -1, &file.path[0], len, nullptr, nullptr);
+            } else {
+                file.path = path.string();
+            }
+            #else
             file.path = path.string();
+            #endif
+
             // Compute relative path for GUI display
             try {
-                file.relPath = fs::relative(path, walkk.baseDirectory).string();
+                fs::path relPath = fs::relative(path, walkk.baseDirectory);
+                #ifdef _WIN32
+                std::wstring wrelPath = relPath.wstring();
+                int len = WideCharToMultiByte(CP_UTF8, 0, wrelPath.c_str(), -1, nullptr, 0, nullptr, nullptr);
+                if (len > 0) {
+                    file.relPath.resize(len - 1);
+                    WideCharToMultiByte(CP_UTF8, 0, wrelPath.c_str(), -1, &file.relPath[0], len, nullptr, nullptr);
+                } else {
+                    file.relPath = relPath.string();
+                }
+                #else
+                file.relPath = relPath.string();
+                #endif
             } catch (...) {
+                #ifdef _WIN32
+                std::wstring wfilename = path.filename().wstring();
+                int len = WideCharToMultiByte(CP_UTF8, 0, wfilename.c_str(), -1, nullptr, 0, nullptr, nullptr);
+                if (len > 0) {
+                    file.relPath.resize(len - 1);
+                    WideCharToMultiByte(CP_UTF8, 0, wfilename.c_str(), -1, &file.relPath[0], len, nullptr, nullptr);
+                } else {
+                    file.relPath = path.filename().string();
+                }
+                #else
                 file.relPath = path.filename().string();
+                #endif
             }
 
             // Open briefly to read metadata, then close to avoid pinning memory per file
@@ -68,26 +119,34 @@ int loadDirectoryMp3s(const char *directoryPath, Walkk &walkk, bool recursive) {
                     std::lock_guard<std::mutex> lk(walkk.loadStatsMutex);
                     walkk.filesLoadedLast++;
                 }
-                std::string msg = std::string("Loaded: ") + path.string() +
+                std::string msg = std::string("Loaded: ") + file.relPath +
                                    " (" + std::to_string(walkk.files.back().totalFrames) + " frames)";
                 std::cout << msg << std::endl;
                 walkk.addLog(msg);
             } else {
-                std::string msg = std::string("Failed to load: ") + path.string();
+                std::string msg = std::string("Failed to load: ") + file.relPath;
                 std::cerr << msg << std::endl;
                 walkk.addLog(msg);
             }
         };
 
+        // Use wide string path for directory iteration on Windows
+        #ifdef _WIN32
+        fs::path dirPath = fs::path(wDirectoryPath);
+        #else
+        fs::path dirPath = fs::path(directoryPath);
+        #endif
+
         if (recursive) {
-            for (const auto &entry : fs::recursive_directory_iterator(directoryPath)) {
+            for (const auto &entry : fs::recursive_directory_iterator(dirPath)) {
                 handleEntry(entry);
             }
         } else {
-            for (const auto &entry : fs::directory_iterator(directoryPath)) {
+            for (const auto &entry : fs::directory_iterator(dirPath)) {
                 handleEntry(entry);
             }
         }
+        
         size_t tried = 0, loaded = 0;
         {
             std::lock_guard<std::mutex> lk(walkk.loadStatsMutex);
@@ -106,7 +165,6 @@ int loadDirectoryMp3s(const char *directoryPath, Walkk &walkk, bool recursive) {
         return 1;
     }
 }
-
 static void applyGrainEnvelope(float *samples, size_t numFrames, size_t channels) {
     for (size_t i = 0; i < numFrames; i++) {
         float t = (numFrames > 1) ? (float)i / (float)(numFrames - 1) : 0.0f;
