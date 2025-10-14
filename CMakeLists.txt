@@ -128,6 +128,10 @@ if(NOT IS_WINDOWS)
         GIT_TAG v2.0.4
     )
     FetchContent_MakeAvailable(glad)
+
+    add_subdirectory("${glad_SOURCE_DIR}/cmake" glad_cmake)
+    # Specify glad settings
+    glad_add_library(glad REPRODUCIBLE API gl:core=3.3)
 endif()
 
 # Set appropriate compile definitions based on platform
@@ -147,7 +151,6 @@ if(IS_WINDOWS)
     target_link_libraries(walkk_gui PRIVATE walkk_core imgui_lib)
 else()
     target_link_libraries(walkk_gui PRIVATE walkk_core imgui_lib glad)
-    target_include_directories(walkk_gui PRIVATE ${glad_SOURCE_DIR}/include)
 endif()
 
 # Windows-specific settings
