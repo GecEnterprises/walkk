@@ -15,6 +15,7 @@
 #include <windows.h>
 #endif
 #include "minimp3_ex.h"
+#include "wav_writer.h"
 #include "walkk.h"
 
 namespace fs = std::filesystem;
@@ -553,4 +554,70 @@ void granulizerLoop(Walkk *walkk) {
     }
 
     walkk->sink.finished.store(true);
+}
+
+bool Walkk::startRecording(const std::string& outputPath) {
+    std::lock_guard<std::mutex> lock(recordingMutex);
+
+    if (isRecording.load()) {
+        return false; // Already recording
+    }
+
+    // Open WAV file for writing
+    recordingFile = fopen(outputPath.c_str(), "wb");
+    if (!recordingFile) {
+        addLog("Failed to open recording file: " + outputPath);
+        return false;
+    }
+
+    // Initialize WAV header
+    WavHeader header;
+    initWavHeader(&header, kSampleRate, kChannels, 16);
+
+    // Write header with placeholder sizes
+    if (!writeWavHeader(recordingFile, &header)) {
+        fclose(recordingFile);
+        recordingFile = nullptr;
+        addLog("Failed to write WAV header");
+        return false;
+    }
+
+    recordingOutputPath = outputPath;
+    recordingDataSize = 0;
+    isRecording.store(true);
+
+    addLog("Started recording to: " + outputPath);
+    return true;
+}
+
+void Walkk::stopRecording() {
+    std::lock_guard<std::mutex> lock(recordingMutex);
+
+    if (!isRecording.load()) {
+        return;
+    }
+
+    // Update WAV header with actual data size
+    if (recordingFile) {
+        if (fseek(recordingFile, 0, SEEK_SET) == 0) {
+            updateWavHeader(recordingFile, recordingDataSize);
+        }
+        fclose(recordingFile);
+        recordingFile = nullptr;
+    }
+
+    isRecording.store(false);
+    addLog("Stopped recording. Total size: " + std::to_string(recordingDataSize) + " bytes");
+}
+
+void Walkk::writeRecordingData(const float* data, size_t frames) {
+    if (!isRecording.load() || !recordingFile) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(recordingMutex);
+
+    if (writeWavAudioData(recordingFile, data, frames, kChannels)) {
+        recordingDataSize += frames * kChannels * sizeof(int16_t);
+    }
 }

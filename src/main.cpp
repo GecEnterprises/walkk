@@ -44,7 +44,7 @@ int main(int argc, char *argv[]) {
         std::cerr << "No MP3 files loaded from directory: " << directory << std::endl;
         return 1;
     }
-    CallbackData callbackData{ &walkk.sink, kSinkChannels };
+    CallbackData callbackData{ &walkk.sink, kSinkChannels, &walkk };
 
     std::thread producer([&walkk]() {
         granulizerLoop(&walkk);

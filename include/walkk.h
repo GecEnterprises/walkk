@@ -132,11 +132,23 @@ struct Walkk {
 
     void addLog(const std::string &line);
 
+    // Recording functionality
+    bool startRecording(const std::string& outputPath);
+    void stopRecording();
+    void writeRecordingData(const float* data, size_t frames);
+
     // Random number generator
     std::mt19937 rng;
 
+    // Recording state
+    std::atomic<bool> isRecording;
+    std::string recordingOutputPath;
+    FILE* recordingFile;
+    std::mutex recordingMutex;
+    size_t recordingDataSize; // Track bytes written for WAV header fixup
+
     explicit Walkk(size_t sinkCapacity)
-        : sink(sinkCapacity), allFinished(false), rng(std::random_device{}()) {}
+        : sink(sinkCapacity), allFinished(false), rng(std::random_device{}()), isRecording(false), recordingFile(nullptr), recordingDataSize(0) {}
 };
 
 

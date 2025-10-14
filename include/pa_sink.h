@@ -5,6 +5,8 @@
 #include <atomic>
 #include <portaudio.h>
 
+struct Walkk; // Forward declaration
+
 struct AudioSink {
 	std::mutex mutex;
 	std::deque<float> queue;
@@ -24,6 +26,7 @@ struct AudioSink {
 struct CallbackData {
 	AudioSink *sink;
 	int channels;
+	Walkk *walkk; // Added for recording functionality
 };
 
 int openAndStartStream(PaStream **stream, CallbackData *cb, int channels, int sampleRate, unsigned long framesPerBuffer);

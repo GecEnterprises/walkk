@@ -42,6 +42,7 @@ add_library(walkk_core
     src/audio_file.cpp
     src/pa_sink.cpp
     src/walkk.cpp
+    src/wav_writer.cpp
 )
 target_include_directories(walkk_core PUBLIC
     ${CMAKE_SOURCE_DIR}/include

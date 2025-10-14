@@ -218,7 +218,7 @@ int main(int argc, char** argv) {
     bool loaded = false;
     std::string directoryPath;
 
-    CallbackData callbackData{ &walkk.sink, kSinkChannels };
+    CallbackData callbackData{ &walkk.sink, kSinkChannels, &walkk };
     PaStream* stream = nullptr;
     std::thread producer;
     std::thread loader;
@@ -284,6 +284,54 @@ int main(int argc, char** argv) {
             if (selectedPath) {
                 directoryPath = selectedPath;
             }
+        }
+
+        // Recording controls
+        ImGui::Separator();
+        ImGui::Text("Recording");
+
+        static char recordingPathBuf[1024] = {0};
+        static std::string recordingPath = "output.wav";
+        if (recordingPath.size() >= sizeof(recordingPathBuf)) recordingPath.resize(sizeof(recordingPathBuf)-1);
+        std::snprintf(recordingPathBuf, sizeof(recordingPathBuf), "%s", recordingPath.c_str());
+        if (ImGui::InputText("Output WAV File", recordingPathBuf, sizeof(recordingPathBuf))) {
+            recordingPath = recordingPathBuf;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Browse WAV...")) {
+            static const char* filters[] = {"*.wav"};
+            const char* selectedFile = tinyfd_saveFileDialog("Save WAV File", recordingPath.c_str(), 1, filters, "WAV Files");
+            if (selectedFile) {
+                recordingPath = selectedFile;
+                // Ensure .wav extension
+                if (recordingPath.size() < 4 || recordingPath.substr(recordingPath.size() - 4) != ".wav") {
+                    recordingPath += ".wav";
+                }
+            }
+        }
+
+        if (!playing) {
+            ImGui::BeginDisabled();
+            ImGui::Button("Start Recording (Play first)");
+            ImGui::EndDisabled();
+        } else {
+            if (!walkk.isRecording.load()) {
+                if (ImGui::Button("Start Recording")) {
+                    if (walkk.startRecording(recordingPath)) {
+                        // Success - status will be shown below
+                    }
+                }
+            } else {
+                if (ImGui::Button("Stop Recording")) {
+                    walkk.stopRecording();
+                }
+            }
+        }
+
+        if (walkk.isRecording.load()) {
+            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "● RECORDING to %s", recordingPath.c_str());
+        } else if (!recordingPath.empty()) {
+            ImGui::Text("Ready to record to: %s", recordingPath.c_str());
         }
 
         if (!playing) {

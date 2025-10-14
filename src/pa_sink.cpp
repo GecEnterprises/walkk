@@ -3,6 +3,7 @@
 #include <portaudio.h>
 
 #include "pa_sink.h"
+#include "walkk.h"
 
 size_t AudioSink::pop(float *out, size_t maxSamples) {
 	std::lock_guard<std::mutex> lock(mutex);
@@ -52,6 +53,15 @@ static int paCallback(const void *inputBuffer, void *outputBuffer,
 	if (copied == 0 && cb->sink->finished.load()) {
 		return paComplete;
 	}
+
+	// Check if we need to record this data
+	// We need to access the Walkk instance somehow. For now, we'll assume
+	// the CallbackData has a pointer to Walkk, but we need to modify the struct
+	if (cb->walkk && cb->walkk->isRecording.load()) {
+		size_t framesCopied = copied / cb->channels;
+		cb->walkk->writeRecordingData(out, framesCopied);
+	}
+
 	return paContinue;
 }
 
