@@ -15,7 +15,7 @@
     #pragma comment(lib, "d3d11.lib")
     #define PLATFORM_WINDOWS
 #else
-    #include <glad/glad.h>
+    #include <glad/gl.h>
     #include <GLFW/glfw3.h>
     #define PLATFORM_LINUX
 #endif
@@ -189,7 +189,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     glfwMakeContextCurrent(window);
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+    if (!gladLoadGL((GLADloadfunc)glfwGetProcAddress)) {
         std::cerr << "Failed to initialize GLAD" << std::endl;
         glfwDestroyWindow(window);
         glfwTerminate();
