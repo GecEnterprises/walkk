@@ -138,8 +138,9 @@ endif()
 
 add_executable(walkk_gui
     src/gui_main.cpp
+    external/tinyfiledialogs/tinyfiledialogs.c
 )
-target_include_directories(walkk_gui PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(walkk_gui PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/external/tinyfiledialogs)
 # Link GUI target with appropriate libraries based on platform
 if(IS_WINDOWS)
     target_link_libraries(walkk_gui PRIVATE walkk_core imgui_lib)

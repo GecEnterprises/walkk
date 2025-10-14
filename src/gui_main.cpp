@@ -29,6 +29,7 @@
     #include "backends/imgui_impl_opengl3.h"
 #endif
 
+#include "tinyfiledialogs.h"
 #include "walkk.h"
 
 #ifdef PLATFORM_WINDOWS
@@ -225,10 +226,6 @@ int main(int argc, char** argv) {
     bool loading = false;
     int loadResult = -1;
 
-    bool openFolderPopup = false;
-    std::filesystem::path browsePath;
-    std::string browsePathBuf;
-
     bool done = false;
     while (!done) {
 #ifdef PLATFORM_WINDOWS
@@ -283,26 +280,10 @@ int main(int argc, char** argv) {
 
         ImGui::SameLine();
         if (ImGui::Button("Browse...")) {
-            try {
-                if (!directoryPath.empty() && std::filesystem::is_directory(directoryPath)) {
-                    browsePath = std::filesystem::path(directoryPath);
-                } else {
-                    const char* home = std::getenv("HOME");
-                    const char* userprofile = std::getenv("USERPROFILE");
-                    if (home && std::filesystem::is_directory(home)) {
-                        browsePath = std::filesystem::path(home);
-                    } else if (userprofile && std::filesystem::is_directory(userprofile)) {
-                        browsePath = std::filesystem::path(userprofile);
-                    } else {
-                        browsePath = std::filesystem::current_path();
-                    }
-                }
-            } catch (...) {
-                browsePath = std::filesystem::current_path();
+            const char* selectedPath = tinyfd_selectFolderDialog("Select Folder", directoryPath.empty() ? nullptr : directoryPath.c_str());
+            if (selectedPath) {
+                directoryPath = selectedPath;
             }
-            browsePathBuf = browsePath.string();
-            openFolderPopup = true;
-            ImGui::OpenPopup("Select Folder");
         }
 
         if (!playing) {
@@ -407,44 +388,6 @@ int main(int argc, char** argv) {
                     walkk.lastGrain.loopEnabled ? "on" : "off",
                     walkk.lastGrain.loopWindowFrames,
                     walkk.lastGrain.loopDragFrames);
-            }
-        }
-
-        if (openFolderPopup) {
-            if (ImGui::BeginPopupModal("Select Folder", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-                ImGui::Text("Current: %s", browsePath.string().c_str());
-                if (ImGui::Button("Up")) {
-                    if (browsePath.has_parent_path()) browsePath = browsePath.parent_path();
-                }
-                ImGui::SameLine();
-                if (ImGui::Button("Select")) {
-                    directoryPath = browsePath.string();
-                    ImGui::CloseCurrentPopup();
-                    openFolderPopup = false;
-                }
-                ImGui::SameLine();
-                if (ImGui::Button("Cancel")) {
-                    ImGui::CloseCurrentPopup();
-                    openFolderPopup = false;
-                }
-
-                ImGui::BeginChild("folder_list", ImVec2(700, 400), true);
-                try {
-                    for (const auto &entry : std::filesystem::directory_iterator(browsePath)) {
-                        std::error_code ec;
-                        bool isDir = entry.is_directory(ec);
-                        if (!ec && isDir) {
-                            std::string name = entry.path().filename().string();
-                            if (ImGui::Selectable(name.c_str(), false)) {
-                                browsePath = entry.path();
-                            }
-                        }
-                    }
-                } catch (...) {
-                }
-                ImGui::EndChild();
-
-                ImGui::EndPopup();
             }
         }
 
