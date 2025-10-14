@@ -269,9 +269,9 @@ int main(int argc, char** argv) {
         ImGui::TextUnformatted(kAsciiArt);
         ImGui::Text("folder of mp3s...");
 
-        static char dirBuf[1024] = {0};
-        if (directoryPath.size() >= sizeof(dirBuf)) directoryPath.resize(sizeof(dirBuf)-1);
-        std::snprintf(dirBuf, sizeof(dirBuf), "%s", directoryPath.c_str());
+    static char dirBuf[1024] = {0};
+    if (directoryPath.size() >= sizeof(dirBuf)) directoryPath.resize(sizeof(dirBuf)-1);
+    std::snprintf(dirBuf, sizeof(dirBuf), "%s", directoryPath.c_str());
         if (ImGui::InputText("Directory", dirBuf, sizeof(dirBuf))) {
             directoryPath = dirBuf;
         }
@@ -286,53 +286,9 @@ int main(int argc, char** argv) {
             }
         }
 
-        // Recording controls
-        ImGui::Separator();
-        ImGui::Text("Recording");
-
+        // Recording variables
         static char recordingPathBuf[1024] = {0};
         static std::string recordingPath = "output.wav";
-        if (recordingPath.size() >= sizeof(recordingPathBuf)) recordingPath.resize(sizeof(recordingPathBuf)-1);
-        std::snprintf(recordingPathBuf, sizeof(recordingPathBuf), "%s", recordingPath.c_str());
-        if (ImGui::InputText("Output WAV File", recordingPathBuf, sizeof(recordingPathBuf))) {
-            recordingPath = recordingPathBuf;
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Browse WAV...")) {
-            static const char* filters[] = {"*.wav"};
-            const char* selectedFile = tinyfd_saveFileDialog("Save WAV File", recordingPath.c_str(), 1, filters, "WAV Files");
-            if (selectedFile) {
-                recordingPath = selectedFile;
-                // Ensure .wav extension
-                if (recordingPath.size() < 4 || recordingPath.substr(recordingPath.size() - 4) != ".wav") {
-                    recordingPath += ".wav";
-                }
-            }
-        }
-
-        if (!playing) {
-            ImGui::BeginDisabled();
-            ImGui::Button("Start Recording (Play first)");
-            ImGui::EndDisabled();
-        } else {
-            if (!walkk.isRecording.load()) {
-                if (ImGui::Button("Start Recording")) {
-                    if (walkk.startRecording(recordingPath)) {
-                        // Success - status will be shown below
-                    }
-                }
-            } else {
-                if (ImGui::Button("Stop Recording")) {
-                    walkk.stopRecording();
-                }
-            }
-        }
-
-        if (walkk.isRecording.load()) {
-            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "● RECORDING to %s", recordingPath.c_str());
-        } else if (!recordingPath.empty()) {
-            ImGui::Text("Ready to record to: %s", recordingPath.c_str());
-        }
 
         if (!playing) {
             if (!loading) {
@@ -414,10 +370,10 @@ int main(int argc, char** argv) {
                         displayName = sf.relPath.empty() ? sf.path : sf.relPath;
                     }
                 }
-                if (!walkk.currentGrain.relPath.empty()) {
-                    ImGui::Text("Now: %s", walkk.currentGrain.relPath.c_str());
-                }
-                if (!displayName.empty()) {
+                // if (!walkk.currentGrain.relPath.empty()) {
+                ImGui::Text("Now: %s", walkk.currentGrain.relPath.c_str());
+                // }
+                // if (!displayName.empty()) {
                     auto now = std::chrono::steady_clock::now();
                     if (walkk.lastGrain.hasExpectedStart && now < walkk.lastGrain.expectedStartTime) {
                         auto msLeft = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -427,7 +383,7 @@ int main(int argc, char** argv) {
                     } else if (!walkk.lastGrain.hasStarted) {
                         ImGui::Text("Next: %s", displayName.c_str());
                     }
-                }
+                // }
                 ImGui::Text("Grain: start=%zu frames  dur=%zu frames  amp=%.2f",
                     walkk.lastGrain.startFrame,
                     walkk.lastGrain.durationFrames,
@@ -510,8 +466,57 @@ int main(int argc, char** argv) {
         }
 
         ImGui::PopStyleVar(3);
-        ImGui::End();
 
+        // Recording controls - moved to bottom in main window
+        ImGui::Separator();
+        ImGui::Text("Recording");
+
+        if (recordingPath.size() >= sizeof(recordingPathBuf)) recordingPath.resize(sizeof(recordingPathBuf)-1);
+        std::snprintf(recordingPathBuf, sizeof(recordingPathBuf), "%s", recordingPath.c_str());
+        if (ImGui::InputText("Output WAV File", recordingPathBuf, sizeof(recordingPathBuf))) {
+            recordingPath = recordingPathBuf;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Browse WAV...")) {
+            static const char* filters[] = {"*.wav"};
+            const char* selectedFile = tinyfd_saveFileDialog("Save WAV File", recordingPath.c_str(), 1, filters, "WAV Files");
+            if (selectedFile) {
+                recordingPath = selectedFile;
+                // Ensure .wav extension
+                if (recordingPath.size() < 4 || recordingPath.substr(recordingPath.size() - 4) != ".wav") {
+                    recordingPath += ".wav";
+                }
+            }
+        }
+
+        if (!playing) {
+            ImGui::BeginDisabled();
+            ImGui::Button("Start Recording (Play first)");
+            ImGui::EndDisabled();
+        } else {
+            if (!walkk.isRecording.load()) {
+                if (ImGui::Button("Start Recording")) {
+                    if (walkk.startRecording(recordingPath)) {
+                        // Success - status will be shown below
+                    }
+                }
+            } else {
+                if (ImGui::Button("Stop Recording")) {
+                    walkk.stopRecording();
+                }
+            }
+        }
+
+        if (walkk.isRecording.load()) {
+            double duration = walkk.getRecordingDurationSeconds();
+            size_t fileSize = walkk.recordingDataSize;
+            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "● RECORDING to %s | Duration: %.1fs | Size: %.1f KB",
+                recordingPath.c_str(), duration, fileSize / 1024.0);
+        } else if (!recordingPath.empty()) {
+            ImGui::Text("Ready to record to: %s", recordingPath.c_str());
+        }
+
+        ImGui::End();
         ImGui::Render();
 
 #ifdef PLATFORM_WINDOWS

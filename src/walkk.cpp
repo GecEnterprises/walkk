@@ -548,12 +548,19 @@ void granulizerLoop(Walkk *walkk) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 }
             }
-        } else {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            walkk->sink.finished.store(true);
         }
     }
+}
 
-    walkk->sink.finished.store(true);
+double Walkk::getRecordingDurationSeconds() {
+    if (!isRecording.load()) {
+        return 0.0;
+    }
+
+    auto now = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::duration<double>>(now - recordingStartTime);
+    return duration.count();
 }
 
 bool Walkk::startRecording(const std::string& outputPath) {
@@ -584,6 +591,7 @@ bool Walkk::startRecording(const std::string& outputPath) {
 
     recordingOutputPath = outputPath;
     recordingDataSize = 0;
+    recordingStartTime = std::chrono::steady_clock::now();
     isRecording.store(true);
 
     addLog("Started recording to: " + outputPath);

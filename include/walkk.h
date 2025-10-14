@@ -136,6 +136,7 @@ struct Walkk {
     bool startRecording(const std::string& outputPath);
     void stopRecording();
     void writeRecordingData(const float* data, size_t frames);
+    double getRecordingDurationSeconds(); // Get current recording duration in seconds
 
     // Random number generator
     std::mt19937 rng;
@@ -146,6 +147,7 @@ struct Walkk {
     FILE* recordingFile;
     std::mutex recordingMutex;
     size_t recordingDataSize; // Track bytes written for WAV header fixup
+    std::chrono::steady_clock::time_point recordingStartTime; // Track when recording started
 
     explicit Walkk(size_t sinkCapacity)
         : sink(sinkCapacity), allFinished(false), rng(std::random_device{}()), isRecording(false), recordingFile(nullptr), recordingDataSize(0) {}
