@@ -72,6 +72,9 @@ struct GrainParams {
     bool   loopEnabled = false;
     size_t loopWindowFrames = 0;  // window size in src frames (pre-resample domain)
     int    loopDragFrames = 0;    // signed shift applied to window start on each wrap
+
+    // New: bounceback/reverse playback
+    bool   reversePlayback = false; // if true, play this grain in reverse
 };
 
 struct Walkk {
@@ -98,6 +101,7 @@ struct Walkk {
         size_t minLoopWindowMs = 20;
         size_t maxLoopWindowMs = 620;
         int    maxLoopDragMs   = 25;   // ± ms
+        float  bouncebackProbability = 0.0f; // 0..1, probability to play grain backwards after forwards
         size_t whiteNoiseMs    = 0;    // silence replaced by white noise between grains
         float  whiteNoiseAmplitude = 0.25f; // 0..1 amplitude for noise
     } settings;
@@ -114,6 +118,7 @@ struct Walkk {
         bool loopEnabled = false;
         size_t loopWindowFrames = 0;
         int loopDragFrames = 0;
+        bool reversePlayback = false; // if true, this grain plays in reverse
         // Estimated audio-out start time for this grain (steady_clock)
         std::chrono::steady_clock::time_point expectedStartTime;
         bool hasExpectedStart = false;

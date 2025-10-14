@@ -294,6 +294,11 @@ static bool readGrain(StreamedFile &file, GrainParams &params, std::vector<float
         // Position in *source* frames if we were reading linearly
         double srcPosLin = (double)dstFrame * rateRatio; // [0..nominalSrcFrames)
 
+        // If reverse playback, flip the position within the grain
+        if (params.reversePlayback) {
+            srcPosLin = (double)(params.durationFrames - 1 - dstFrame) * rateRatio;
+        }
+
         int64_t srcFileFrame;
         if (useLoop) {
             // Reduce srcPosLin into repeated windows, shifting by drag on each wrap
@@ -410,9 +415,12 @@ static GrainParams generateRandomGrain(Walkk &walkk) {
         grain.loopDragFrames   = 0;
     }
 
+    // --- New: decide whether this grain uses reverse playback ---
+    std::bernoulli_distribution bouncebackDist(std::clamp(settingsSnapshot.bouncebackProbability, 0.0f, 1.0f));
+    grain.reversePlayback = bouncebackDist(walkk.rng);
+
     return grain;
 }
-
 
 void granulizerLoop(Walkk *walkk) {
     if (walkk->files.empty()) {
@@ -442,7 +450,8 @@ void granulizerLoop(Walkk *walkk) {
                                " (" + fname + ") start=" + std::to_string(grain.startFrame) +
                                " dur=" + std::to_string(grain.durationFrames) + "f" +
                                " amp=" + std::to_string(grain.amplitude) +
-                               (grain.loopEnabled ? " loop=on" : " loop=off");
+                               (grain.loopEnabled ? " loop=on" : " loop=off") +
+                               (grain.reversePlayback ? " reverse=on" : " reverse=off");
             std::cout << gmsg << std::endl;
             walkk->addLog(gmsg);
         }
@@ -472,6 +481,7 @@ void granulizerLoop(Walkk *walkk) {
             walkk->lastGrain.loopEnabled = grain.loopEnabled;
             walkk->lastGrain.loopWindowFrames = grain.loopWindowFrames;
             walkk->lastGrain.loopDragFrames = grain.loopDragFrames;
+            walkk->lastGrain.reversePlayback = grain.reversePlayback;
         }
 
         if (!readGrain(walkk->files[grain.fileIndex], grain, grainBuffer, Walkk::kSampleRate)) {

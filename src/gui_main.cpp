@@ -388,10 +388,11 @@ int main(int argc, char** argv) {
                     walkk.lastGrain.startFrame,
                     walkk.lastGrain.durationFrames,
                     walkk.lastGrain.amplitude);
-                ImGui::Text("Loop: %s  win=%zu fr  drag=%d fr",
+                ImGui::Text("Loop: %s  win=%zu fr  drag=%d fr  reverse=%s",
                     walkk.lastGrain.loopEnabled ? "on" : "off",
                     walkk.lastGrain.loopWindowFrames,
-                    walkk.lastGrain.loopDragFrames);
+                    walkk.lastGrain.loopDragFrames,
+                    walkk.lastGrain.reversePlayback ? "on" : "off");
             }
         }
 
@@ -420,6 +421,7 @@ int main(int argc, char** argv) {
             int minWin = (int)walkk.settings.minLoopWindowMs;
             int maxWin = (int)walkk.settings.maxLoopWindowMs;
             int maxDrag = (int)walkk.settings.maxLoopDragMs;
+            float bouncebackProb = walkk.settings.bouncebackProbability;
             int whiteNoise = (int)walkk.settings.whiteNoiseMs;
             float whiteNoiseVol = walkk.settings.whiteNoiseAmplitude;
 
@@ -442,6 +444,10 @@ int main(int argc, char** argv) {
             ImGui::SliderFloat("Loop Probability", &loopProb, 0.0f, 1.0f);
             if (loopProb < 0.0f) loopProb = 0.0f; else if (loopProb > 1.0f) loopProb = 1.0f;
             walkk.settings.loopProbability = loopProb;
+
+            ImGui::SliderFloat("Bounceback Probability", &bouncebackProb, 0.0f, 1.0f);
+            if (bouncebackProb < 0.0f) bouncebackProb = 0.0f; else if (bouncebackProb > 1.0f) bouncebackProb = 1.0f;
+            walkk.settings.bouncebackProbability = bouncebackProb;
 
             if (ImGui::SliderInt("Min Loop Window (ms)", &minWin, 1, 5000)) {
                 walkk.settings.minLoopWindowMs = (size_t)std::max(1, minWin);
