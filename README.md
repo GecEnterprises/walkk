@@ -45,4 +45,4 @@ Install to your system prefix:
 cmake --install build
 
 ## license
-MIT
+LGPL-2.1
