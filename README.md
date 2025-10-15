@@ -14,6 +14,7 @@ sudo apt install -y \
   portaudio19-dev \
   libgl1-mesa-dev
 sudo apt install -y libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+sudo apt install -y python3 python3-jinja2
 ```
 
 ### fedora
@@ -23,7 +24,7 @@ sudo dnf install -y \
   @development-tools cmake git pkgconf-pkg-config \
   portaudio-devel \
   mesa-libGL-devel
-sudo dnf install -y libXrandr-devel libXinerama-devel libXcursor-devel libXi-devel
+sudo dnf install -y libXrandr-devel libXinerama-devel libXcursor-devel libXi-devel python3-jinja2
 ```
 
 
