@@ -13,6 +13,7 @@ sudo apt install -y \
   build-essential cmake pkg-config git \
   portaudio19-dev \
   libgl1-mesa-dev
+sudo apt install -y libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
 ```
 
 ### fedora
@@ -22,6 +23,7 @@ sudo dnf install -y \
   @development-tools cmake git pkgconf-pkg-config \
   portaudio-devel \
   mesa-libGL-devel
+sudo dnf install -y libXrandr-devel libXinerama-devel libXcursor-devel libXi-devel
 ```
 
 
