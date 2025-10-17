@@ -1,9 +1,13 @@
 #include <algorithm>
+#include <cmath>
 
 #include <portaudio.h>
 
 #include "pa_sink.h"
 #include "walkk.h"
+
+// Global atomic float to track current amplitude
+std::atomic<float> g_currentAmplitude(0.0f);
 
 size_t AudioSink::pop(float *out, size_t maxSamples) {
 	std::lock_guard<std::mutex> lock(mutex);
@@ -31,6 +35,11 @@ size_t AudioSink::getQueuedSamples() {
 	return queue.size();
 }
 
+// Function to read the current amplitude
+float getCurrentAmplitude() {
+	return g_currentAmplitude.load(std::memory_order_relaxed);
+}
+
 static int paCallback(const void *inputBuffer, void *outputBuffer,
 						unsigned long framesPerBuffer,
 						const PaStreamCallbackTimeInfo* timeInfo,
@@ -48,6 +57,16 @@ static int paCallback(const void *inputBuffer, void *outputBuffer,
 	size_t copied = cb->sink->pop(out, samplesNeeded);
 	for (size_t i = copied; i < samplesNeeded; i++) {
 		out[i] = 0.0f;
+	}
+
+	// Calculate RMS amplitude of the output buffer
+	float sumSquares = 0.0f;
+	for (size_t i = 0; i < copied; i++) {
+		sumSquares += out[i] * out[i];
+	}
+	if (copied > 0) {
+		float rms = std::sqrt(sumSquares / copied);
+		g_currentAmplitude.store(rms, std::memory_order_relaxed);
 	}
 
 	if (copied == 0 && cb->sink->finished.load()) {
@@ -99,5 +118,3 @@ void stopAndCloseStream(PaStream *stream) {
 	Pa_CloseStream(stream);
 	Pa_Terminate();
 }
-
-

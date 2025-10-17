@@ -32,4 +32,4 @@ struct CallbackData {
 int openAndStartStream(PaStream **stream, CallbackData *cb, int channels, int sampleRate, unsigned long framesPerBuffer);
 void stopAndCloseStream(PaStream *stream);
 
-
+float getCurrentAmplitude();
